@@ -76,6 +76,28 @@ static const struct device *get_bme280_device(void)
 	return dev;
 }
 
+static int read_sensor_data(struct device *bme280, char *buffer, size_t buffer_size)
+{
+	int ret;
+	struct sensor_value temp, press, humidity;
+
+	ret = sensor_sample_fetch(bme280);
+	if (ret < 0) {
+		return ret;
+	}
+
+	sensor_channel_get(bme280, SENSOR_CHAN_AMBIENT_TEMP, &temp);
+	sensor_channel_get(bme280, SENSOR_CHAN_PRESS, &press);
+	sensor_channel_get(bme280, SENSOR_CHAN_HUMIDITY, &humidity);
+
+	ret = snprintf(buffer, buffer_size,
+				  	"Temp: %d.%06d; press: %d.%06d; humidity: %d.%06d\n",
+				   	temp.val1, temp.val2, press.val1, press.val2,
+					humidity.val1, humidity.val2);
+
+	return ret;
+}
+
 static void quit(void)
 {
 	k_sem_give(&quit_lock);
@@ -218,7 +240,12 @@ static int send_packet_socket(struct packet_data *packet)
 	}
 
 	while (!finish) {
-		int len = strlen(buffer);
+		int len = read_sensor_data(bme280, buffer, sizeof(buffer));
+		if (len < 0) {
+			LOG_ERR("Failed to read sensor data");
+			return -1;
+		}
+
 		ret = sendto(packet->send_sock, buffer, len, 0,
 			     	 (const struct sockaddr *)&dst,
 			     	 sizeof(struct sockaddr_ll));
@@ -278,6 +305,8 @@ static void wait_for_interface(void)
 	struct net_mgmt_event_callback iface_up_cb;
 	uint16_t pan_id = 0x1111;
 	uint16_t channel = 15;
+	uint16_t short_addr;
+	uint8_t ext_addr[IEEE802154_MAX_ADDR_LENGTH];
 
 	int ret;
 
