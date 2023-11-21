@@ -44,7 +44,7 @@ static struct packet_data packet;
 static bool finish;
 static K_SEM_DEFINE(iface_up, 0, 1);
 static char buffer[RECV_BUFFER_SIZE] = "This is sample data";
-static const struct device *bme280;
+static const struct device *bme280 = NULL;
 
 static void recv_packet(void);
 static void send_packet(void);
@@ -240,10 +240,13 @@ static int send_packet_socket(struct packet_data *packet)
 	}
 
 	while (!finish) {
-		int len = read_sensor_data(bme280, buffer, sizeof(buffer));
-		if (len < 0) {
-			LOG_ERR("Failed to read sensor data");
-			return -1;
+		int len = strlen(buffer);
+		if (bme280) {
+			len = read_sensor_data(bme280, buffer, sizeof(buffer));
+			if (len < 0) {
+				LOG_ERR("Failed to read sensor data");
+				return -1;
+			}
 		}
 
 		ret = sendto(packet->send_sock, buffer, len, 0,
@@ -323,6 +326,24 @@ static void wait_for_interface(void)
 	if (ret) {
 		NET_ERR("*** Failed to set pan id\n");
 	}
+
+	ret = net_mgmt(NET_REQUEST_IEEE802154_GET_EXT_ADDR, iface, ext_addr, sizeof(ext_addr));
+	if (ret) {
+		NET_ERR("*** Failed to get extended address\n");
+	}
+
+	short_addr = ((uint16_t)ext_addr[6]) << 8 | ext_addr[7];
+
+	ret = net_mgmt(NET_REQUEST_IEEE802154_SET_SHORT_ADDR, iface,
+				   &short_addr, sizeof(short_addr));
+	if (ret) {
+		NET_ERR("*** Failed to set short addr\n");
+	}
+
+	// ret = net_mgmt(NET_REQUEST_IEEE802154_SET_ACK, iface, NULL, 0);
+	// if (ret) {
+	// 	NET_ERR("*** Failed to set ack request addr\n");
+	// }
 
 	net_mgmt_init_event_callback(&iface_up_cb, iface_up_handler, NET_EVENT_IF_UP);
 	net_mgmt_add_event_callback(&iface_up_cb);
