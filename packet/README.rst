@@ -35,3 +35,10 @@ Tasks
 4. Modify the program, so that it sends the data only on a button press. The button press should be detected using an interrupt. Remember that sending data directly from interrupt is not a good idea.
 5. Modify the sample, so that the packet contains data from BME280 environmental sensor. If you don't have you don't have a the sensor then send button press counter value.
 6. Modify the program, so that it sends data to a unicast rather than broadcast address. You can use the address of one of your classmates.
+7. Modify the program, so that an acknowledgement is requested on a unicast packet. You can use the following code:
+
+.. code-block:: c
+	ret = net_mgmt(NET_REQUEST_IEEE802154_SET_ACK, iface, NULL, 0);
+	if (ret) {
+		NET_ERR("*** Failed to set ack request addr\n");
+	}
