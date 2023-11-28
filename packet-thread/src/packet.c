@@ -159,6 +159,19 @@ static void recv_packet(void)
 		if (received > 0) {
 			print_address(src_addr.sa_family, &src_addr);
 			LOG_HEXDUMP_DBG(buffer, received, "Data:");
+
+			if (bme280) {
+				len = read_sensor_data(bme280, buffer, sizeof(buffer));
+			} else {
+				len = snprintf(buffer, sizeof(buffer), "Hello from Zephyr!\n");
+			}
+
+			if (len) {
+				ret = sendto(socket, buffer, len, 0, &src_addr, addrlen);
+				if (ret < 0) {
+					LOG_ERR("Failed to send, errno %d", errno);
+				}
+			}
 		} else if (errno != EAGAIN) {
 			LOG_ERR("RAW : recv error %d", errno);
 			ret = -errno;
