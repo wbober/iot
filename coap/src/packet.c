@@ -21,9 +21,11 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
 #include <zephyr/net/ieee802154_mgmt.h>
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/net_ip.h>
+#include <zephyr/net/openthread.h>
 #include <zephyr/net/coap.h>
 #include <zephyr/net/coap_link_format.h>
 
+#include <zephyr/shell/shell.h>
 
 #define STACK_SIZE 4096
 #if defined(CONFIG_NET_TC_THREAD_COOPERATIVE)
@@ -38,8 +40,9 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
 static struct k_sem quit_lock;
 static bool finish;
 static K_SEM_DEFINE(iface_up, 0, 1);
-int socket;
+int sock;
 static const struct device *bme280;
+static struct coap_resource coap_resources[];
 
 #define NUM_PENDINGS 10
 static struct coap_pending pendings[NUM_PENDINGS];
@@ -97,8 +100,6 @@ static int send_coap_reply(struct coap_packet *cpkt,
 {
 	int r;
 
-	net_hexdump("Response", cpkt->data, cpkt->offset);
-
 	r = sendto(sock, cpkt->data, cpkt->offset, 0, addr, addr_len);
 	if (r < 0) {
 		LOG_ERR("Failed to send %d", errno);
@@ -113,36 +114,26 @@ static int well_known_core_get(struct coap_resource *resource,
 			       struct sockaddr *addr, socklen_t addr_len)
 {
 	struct coap_packet response;
-	uint8_t *data;
+	uint8_t data[MAX_MSG_LEN];
 	int r;
-
-	data = (uint8_t *)k_malloc(MAX_MSG_LEN);
-	if (!data) {
-		return -ENOMEM;
-	}
 
 	r = coap_well_known_core_get(resource, request, &response,
 				     data, MAX_MSG_LEN);
 	if (r < 0) {
-		goto end;
+		return r;
 	}
 
-	r = send_coap_reply(&response, addr, addr_len);
-
-end:
-	k_free(data);
-
-	return r;
+	return send_coap_reply(&response, addr, addr_len);
 }
 
 static int piggyback_get(struct coap_resource *resource,
-			 struct coap_packet *request,
-			 struct sockaddr *addr, socklen_t addr_len)
+			 			 struct coap_packet *request,
+			 			 struct sockaddr *addr, socklen_t addr_len)
 {
 	struct coap_packet response;
 	uint8_t payload[40];
 	uint8_t token[COAP_TOKEN_MAX_LEN];
-	uint8_t *data;
+	uint8_t data[MAX_MSG_LEN];
 	uint16_t id;
 	uint8_t code;
 	uint8_t type;
@@ -164,11 +155,6 @@ static int piggyback_get(struct coap_resource *resource,
 		type = COAP_TYPE_NON_CON;
 	}
 
-	data = (uint8_t *)k_malloc(MAX_MSG_LEN);
-	if (!data) {
-		return -ENOMEM;
-	}
-
 	r = coap_packet_init(&response, data, MAX_MSG_LEN,
 			     COAP_VERSION_1, type, tkl, token,
 			     COAP_RESPONSE_CODE_CONTENT, id);
@@ -187,9 +173,7 @@ static int piggyback_get(struct coap_resource *resource,
 		goto end;
 	}
 
-	/* The response that coap-client expects */
-	r = snprintk((char *) payload, sizeof(payload),
-		     "Type: %u\nCode: %u\nMID: %u\n", type, code, id);
+	r = read_sensor_data((struct device *)bme280, (char *)payload, sizeof(payload));
 	if (r < 0) {
 		goto end;
 	}
@@ -203,8 +187,6 @@ static int piggyback_get(struct coap_resource *resource,
 	r = send_coap_reply(&response, addr, addr_len);
 
 end:
-	k_free(data);
-
 	return r;
 }
 
@@ -236,10 +218,6 @@ static void process_coap_request(uint8_t *data, uint16_t data_len,
 	if (type == COAP_TYPE_ACK || type == COAP_TYPE_RESET) {
 		k_free(pending->data);
 		coap_pending_clear(pending);
-
-		// if (type == COAP_TYPE_RESET) {
-		// 	remove_observer(client_addr);
-		// }
 	}
 
 	return;
@@ -257,20 +235,20 @@ static void quit(void)
 	k_sem_give(&quit_lock);
 }
 
-static int create_datagram_socket(const struct sockaddr *addr, socklen_t addrlen)
+static int create_datagram_sock(const struct sockaddr *addr, socklen_t addrlen)
 {
 	int ret;
 	int sock;
 
 	sock = socket(addr->sa_family, SOCK_DGRAM, IPPROTO_UDP);
 	if (sock < 0) {
-		LOG_ERR("Failed to create socket: %d", errno);
+		LOG_ERR("Failed to create sock: %d", errno);
 		return -errno;
 	}
 
 	ret = bind(sock, addr, addrlen);
 	if (ret < 0) {
-		LOG_ERR("Failed to bind packet socket : %d", errno);
+		LOG_ERR("Failed to bind packet sock : %d", errno);
 		return -errno;
 	}
 
@@ -303,13 +281,13 @@ static void recv_packet(void)
 		.sin6_addr = in6addr_any,
 	};
 
-	socket = create_datagram_socket((const struct sockaddr *)&addr, sizeof(addr));
+	sock = create_datagram_sock((const struct sockaddr *)&addr, sizeof(addr));
 	if (ret < 0) {
 		quit();
 		return;
 	}
 
-	ret = setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &timeo_optval, sizeof(timeo_optval));
+	ret = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeo_optval, sizeof(timeo_optval));
 	if (ret < 0) {
 		quit();
 		return;
@@ -322,12 +300,12 @@ static void recv_packet(void)
 	socklen_t addrlen = sizeof(src_addr);
 
 	while (ret >= 0) {
-		received = recvfrom(socket, buffer,sizeof(buffer), 0, &src_addr, &addrlen);
+		received = recvfrom(sock, buffer,sizeof(buffer), 0, &src_addr, &addrlen);
 		if (received > 0) {
 			print_address(src_addr.sa_family, &src_addr);
 			LOG_HEXDUMP_DBG(buffer, received, "Data:");
 
-			process_coap_request(buffer, received, &src_addr, addrlen)
+			process_coap_request(buffer, received, &src_addr, addrlen);
 
 		} else if (errno != EAGAIN) {
 			LOG_ERR("RAW : recv error %d", errno);
@@ -335,7 +313,7 @@ static void recv_packet(void)
 		}
 	}
 
-	close(socket);
+	close(sock);
 }
 
 static void iface_up_handler(struct net_mgmt_event_callback *cb,
@@ -382,6 +360,53 @@ static struct coap_resource coap_resources[] = {
 	},
 	{ },
 };
+
+// Usage: address resource
+void coap_response_cb(int16_t code, size_t offset, const uint8_t *payload, size_t len,
+                 bool last_block, void *user_data)
+{
+    if (code >= 0) {
+		LOG_INF("CoAP response from server %d", code);
+		LOG_HEXDUMP_DBG(payload, len, "Data:");
+		if (last_block) {
+				LOG_INF("Last packet received");
+		}
+	} else {
+		LOG_ERR("Error in sending request %d", code);
+    }
+}
+
+static int coap_get_handler(const struct shell *sh,
+                            size_t argc, char **argv, void *data)
+{
+	static struct coap_client;
+	struct coap_client_request req = { 0 };
+	struct sockaddr address;
+
+	if (net_addr_pton(AF_INET6, argv[1], &net_sin6(&address)->sin6_addr) != 0) {
+		LOG_ERR("Invalid address");
+		return -EINVAL;
+	};
+
+	char *path = "sensor";
+	struct coap_packet request;
+	uint8_t data[100];
+	uint8_t payload[20];
+
+	coap_packet_init(&request, data, sizeof(data),
+					1, COAP_TYPE_CON, 8, coap_next_token(),
+					COAP_METHOD_GET, coap_next_id());
+
+	/* Append options */
+	coap_packet_append_option(&request, COAP_OPTION_URI_PATH,
+							path, strlen(path));
+
+
+
+	return 0;
+}
+
+SHELL_CMD_REGISTER(coap_get, NULL, "CoAP GET", coap_get_handler);
 
 int main(void)
 {
