@@ -38,6 +38,7 @@ Tasks
 7. Modify the program, so that an acknowledgement is requested on a unicast packet. You can use the following code:
 
 .. code-block:: c
+
 	ret = net_mgmt(NET_REQUEST_IEEE802154_SET_ACK, iface, NULL, 0);
 	if (ret) {
 		NET_ERR("*** Failed to set ack request addr\n");
