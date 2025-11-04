@@ -332,18 +332,23 @@ static void wait_for_interface(void)
 		NET_ERR("*** Failed to get extended address\n");
 	}
 
+	// The following snippet sets the short address:
+	/*
 	short_addr = ((uint16_t)ext_addr[6]) << 8 | ext_addr[7];
-
 	ret = net_mgmt(NET_REQUEST_IEEE802154_SET_SHORT_ADDR, iface,
 				   &short_addr, sizeof(short_addr));
 	if (ret) {
 		NET_ERR("*** Failed to set short addr\n");
 	}
+	*/
 
-	// ret = net_mgmt(NET_REQUEST_IEEE802154_SET_ACK, iface, NULL, 0);
-	// if (ret) {
-	// 	NET_ERR("*** Failed to set ack request addr\n");
-	// }
+	// The following snippet requests 802.15.4 ACK
+	/*
+	ret = net_mgmt(NET_REQUEST_IEEE802154_SET_ACK, iface, NULL, 0);
+	if (ret) {
+		NET_ERR("*** Failed to set ack request addr\n");
+	}
+	*/
 
 	net_mgmt_init_event_callback(&iface_up_cb, iface_up_handler, NET_EVENT_IF_UP);
 	net_mgmt_add_event_callback(&iface_up_cb);
