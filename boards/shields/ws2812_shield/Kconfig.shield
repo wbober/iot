@@ -1,0 +1,3 @@
+config SHIELD_WS2812_SHIELD
+	def_bool $(shields_list_contains,ws2812_shield)
+	depends on BOARD_NRF52840DK_NRF52840 || BOARD_NRF5340DK_NRF5340_CPUAPP

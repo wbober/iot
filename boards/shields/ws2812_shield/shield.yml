@@ -1,0 +1,6 @@
+shields:
+  - name: ws2812_shield
+    full_name: WS2812 LED Strip Shield
+    vendor: Custom
+    supported_features:
+      - led

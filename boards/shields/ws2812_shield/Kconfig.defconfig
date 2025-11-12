@@ -1,0 +1,12 @@
+if SHIELD_WS2812_SHIELD
+
+config I2S
+	default y
+
+config LED_STRIP
+	default y
+
+config WS2812_STRIP_I2S
+	default y
+
+endif # SHIELD_WS2812_SHIELD
