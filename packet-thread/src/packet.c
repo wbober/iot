@@ -14,6 +14,7 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/led_strip.h>
 
 #include <zephyr/net/socket.h>
 #include <zephyr/net/ethernet.h>
@@ -21,6 +22,7 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
 #include <zephyr/net/ieee802154_mgmt.h>
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/net_ip.h>
+#include <zephyr/net/openthread.h>
 
 #define STACK_SIZE 4096
 #if defined(CONFIG_NET_TC_THREAD_COOPERATIVE)
@@ -34,6 +36,20 @@ static struct k_sem quit_lock;
 static bool finish;
 static K_SEM_DEFINE(iface_up, 0, 1);
 static const struct device *bme280;
+
+#define LED_STRIP_NODE DT_NODELABEL(led_strip)
+#if DT_NODE_EXISTS(LED_STRIP_NODE)
+#define LED_STRIP_SIZE DT_PROP(LED_STRIP_NODE, chain_length)
+#define FILL_LED_STRIP(pixels, size, _r, _g, _b) \
+do { \
+	for (int i = 0; i < (size); i++) { \
+		pixels[i].r = (_r); \
+		pixels[i].g = (_g); \
+		pixels[i].b = (_b); \
+	} \
+} while (0)
+static const struct device *led_dev = DEVICE_DT_GET(LED_STRIP_NODE);
+#endif
 
 static void recv_packet(void);
 
@@ -60,7 +76,7 @@ static const struct device *get_bme280_device(void)
 	return dev;
 }
 
-static int read_sensor_data(struct device *bme280, char *buffer, size_t buffer_size)
+static int read_sensor_data(const struct device *bme280, char *buffer, size_t buffer_size)
 {
 	int ret;
 	struct sensor_value temp, press, humidity;
@@ -81,6 +97,33 @@ static int read_sensor_data(struct device *bme280, char *buffer, size_t buffer_s
 
 	return ret;
 }
+
+#if DT_NODE_EXISTS(LED_STRIP_NODE)
+static void update_led_strip(uint8_t position, uint8_t r, uint8_t g, uint8_t b)
+{
+	static struct led_rgb led_pixels[LED_STRIP_SIZE];
+
+	if (!device_is_ready(led_dev)) {
+		LOG_ERR("LED strip device not ready");
+		return;
+	}
+
+	if (position < LED_STRIP_SIZE) {
+		led_pixels[position].r = r;
+		led_pixels[position].g = g;
+		led_pixels[position].b = b;
+	} else if (position == LED_STRIP_SIZE) {
+		FILL_LED_STRIP(led_pixels, LED_STRIP_SIZE, r, g, b);
+	} else {
+		LOG_ERR("Invalid position: %d", position);
+	}
+	
+	int ret = led_strip_update_rgb(led_dev, led_pixels, LED_STRIP_SIZE);
+	if (ret < 0) {
+		LOG_ERR("Failed to update LED strip: %d", ret);
+	}
+}
+#endif
 
 
 static void quit(void)
@@ -137,7 +180,7 @@ static void recv_packet(void)
 	};
 
 	socket = create_datagram_socket((const struct sockaddr *)&addr, sizeof(addr));
-	if (ret < 0) {
+	if (socket < 0) {
 		quit();
 		return;
 	}
@@ -156,15 +199,32 @@ static void recv_packet(void)
 
 	while (ret >= 0) {
 		received = recvfrom(socket, buffer,	sizeof(buffer), 0, &src_addr, &addrlen);
+
 		if (received > 0) {
 			print_address(src_addr.sa_family, &src_addr);
 			LOG_HEXDUMP_DBG(buffer, received, "Data:");
 
-			if (bme280) {
-				len = read_sensor_data(bme280, buffer, sizeof(buffer));
+			if (strncmp(buffer, "led:", 4) == 0) {
+				if (DT_NODE_EXISTS(LED_STRIP_NODE)) {
+					uint8_t r, g, b;
+					if (sscanf(buffer, "led:%c,%c,%c", &r, &g, &b) == 3) {
+						update_led_strip(LED_STRIP_SIZE, r, g, b);
+					} else {
+						LOG_ERR("Invalid LED command: %s", buffer);
+					}
+				} else {
+					LOG_ERR("LED strip device not found or not ready");
+				}
+			} else if (strncmp(buffer, "temp", 4) == 0) {
+				if (bme280) {
+					len = read_sensor_data(bme280, buffer, sizeof(buffer));
+				} else {
+					LOG_ERR("BME280 not found");
+				}
 			} else {
 				len = snprintf(buffer, sizeof(buffer), "Hello from Zephyr!\n");
 			}
+
 
 			if (len) {
 				ret = sendto(socket, buffer, len, 0, &src_addr, addrlen);
@@ -217,9 +277,19 @@ int main(void)
 	k_sem_init(&quit_lock, 0, K_SEM_MAX_LIMIT);
 
 	bme280 = get_bme280_device();
+	
+	#if DT_NODE_EXISTS(LED_STRIP_NODE)
+	if (device_is_ready(led_dev)) {
+		struct led_rgb led_pixels[LED_STRIP_SIZE];
+		FILL_LED_STRIP(led_pixels, LED_STRIP_SIZE, 0, 0, 20);
+		led_strip_update_rgb(led_dev, led_pixels, LED_STRIP_SIZE);
+	} else {
+		LOG_WRN("LED strip device not ready");
+	}
+	#endif
 
 	k_thread_start(receiver_thread_id);
-	openthread_start(openthread_get_default_context());
+	openthread_run();
 
 	k_sem_take(&quit_lock, K_FOREVER);
 
