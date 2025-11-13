@@ -13,7 +13,12 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/sensor.h>
+
+/* BME280 Environmental Sensor */
+#define BME280_NODE DT_NODELABEL(bme280_sensor)
+#if DT_NODE_EXISTS(BME280_NODE)
+#include <bme280_shield.h>
+#endif
 
 #include <zephyr/net/socket.h>
 #include <zephyr/net/ethernet.h>
@@ -42,7 +47,10 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
 static struct k_sem quit_lock;
 int sock;
 
+#if DT_NODE_EXISTS(BME280_NODE)
 static const struct device *bme280;
+#endif
+
 static struct coap_resource coap_resources[];
 static struct coap_reply coap_replies[3];
 
@@ -51,47 +59,6 @@ static void recv_packet(void);
 K_THREAD_DEFINE(receiver_thread_id, STACK_SIZE,
 		recv_packet, NULL, NULL, NULL,
 		THREAD_PRIORITY, 0, -1);
-
-static const struct device *get_bme280_device(void)
-{
-	const struct device *const dev = DEVICE_DT_GET_ANY(bosch_bme280);
-
-	if (dev == NULL) {
-		/* No such node, or the node does not have status "okay". */
-		LOG_ERR("Error: no device found.");
-		return NULL;
-	}
-
-	if (!device_is_ready(dev)) {
-		LOG_ERR("Error: Device \"%s\" is not ready; ", dev->name);
-		return NULL;
-	}
-
-	LOG_INF("Found device \"%s\"", dev->name);
-	return dev;
-}
-
-static int read_sensor_data(struct device *bme280, char *buffer, size_t buffer_size)
-{
-	int ret;
-	struct sensor_value temp, press, humidity;
-
-	ret = sensor_sample_fetch(bme280);
-	if (ret < 0) {
-		return ret;
-	}
-
-	sensor_channel_get(bme280, SENSOR_CHAN_AMBIENT_TEMP, &temp);
-	sensor_channel_get(bme280, SENSOR_CHAN_PRESS, &press);
-	sensor_channel_get(bme280, SENSOR_CHAN_HUMIDITY, &humidity);
-
-	ret = snprintf(buffer, buffer_size,
-				  	"Temp: %d.%06d; press: %d.%06d; humidity: %d.%06d\n",
-				   	temp.val1, temp.val2, press.val1, press.val2,
-					humidity.val1, humidity.val2);
-
-	return ret;
-}
 
 static int send_coap_reply(struct coap_packet *cpkt,
 			   const struct sockaddr *addr,
@@ -168,7 +135,24 @@ static int piggyback_get(struct coap_resource *resource,
 		goto end;
 	}
 
-	// read sensor data and append to payload
+	// Read sensor data and append to payload
+#if DT_NODE_EXISTS(BME280_NODE)
+	if (bme280) {
+		int len = bme280_shield_read_sensor_data(bme280, (char *)payload, sizeof(payload));
+		if (len > 0) {
+			r = coap_packet_append_payload(&response, payload, len);
+			if (r < 0) {
+				goto end;
+			}
+		}
+	} else {
+		snprintf((char *)payload, sizeof(payload), "BME280 not available");
+		r = coap_packet_append_payload(&response, payload, strlen((char *)payload));
+	}
+#else
+	snprintf((char *)payload, sizeof(payload), "BME280 not configured");
+	r = coap_packet_append_payload(&response, payload, strlen((char *)payload));
+#endif
 
 	r = send_coap_reply(&response, addr, addr_len);
 
@@ -363,7 +347,9 @@ int main(void)
 {
 	k_sem_init(&quit_lock, 0, K_SEM_MAX_LIMIT);
 
-	bme280 = get_bme280_device();
+#if DT_NODE_EXISTS(BME280_NODE)
+	bme280 = bme280_shield_get_device();
+#endif
 
 	k_thread_start(receiver_thread_id);
 	openthread_start(openthread_get_default_context());
