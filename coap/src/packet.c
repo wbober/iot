@@ -20,6 +20,13 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
 #include <bme280_shield.h>
 #endif
 
+/* WS2812 LED Strip */
+#define LED_STRIP_NODE DT_NODELABEL(led_strip)
+#if DT_NODE_EXISTS(LED_STRIP_NODE)
+#include <zephyr/drivers/led_strip.h>
+#define LED_STRIP_SIZE DT_PROP(LED_STRIP_NODE, chain_length)
+#endif
+
 #include <zephyr/net/socket.h>
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/ieee802154.h>
@@ -49,6 +56,10 @@ int sock;
 
 #if DT_NODE_EXISTS(BME280_NODE)
 static const struct device *bme280;
+#endif
+
+#if DT_NODE_EXISTS(LED_STRIP_NODE)
+static const struct device *led_dev = DEVICE_DT_GET(LED_STRIP_NODE);
 #endif
 
 static struct coap_resource coap_resources[];
@@ -159,6 +170,87 @@ static int piggyback_get(struct coap_resource *resource,
 end:
 	return r;
 }
+
+#if DT_NODE_EXISTS(LED_STRIP_NODE)
+static int led_post(struct coap_resource *resource,
+		    struct coap_packet *request,
+		    struct sockaddr *addr, socklen_t addr_len)
+{
+	struct coap_packet response;
+	uint8_t token[COAP_TOKEN_MAX_LEN];
+	uint8_t data[MAX_MSG_LEN];
+	uint8_t *payload;
+	uint16_t payload_len;
+	uint16_t id;
+	uint8_t code;
+	uint8_t type;
+	uint8_t tkl;
+	int r;
+
+	if (!device_is_ready(led_dev)) {
+		LOG_ERR("LED strip device not ready");
+		return -ENODEV;
+	}
+
+	code = coap_header_get_code(request);
+	type = coap_header_get_type(request);
+	id = coap_header_get_id(request);
+	tkl = coap_header_get_token(request, token);
+
+	payload = coap_packet_get_payload(request, &payload_len);
+	
+	// Parse RGB values from payload: format "R,G,B" or "R G B"
+	if (payload && payload_len > 0) {
+		uint8_t r_val, g_val, b_val;
+		char payload_str[32];
+		
+		// Null-terminate payload for parsing
+		memcpy(payload_str, payload, MIN(payload_len, sizeof(payload_str) - 1));
+		payload_str[MIN(payload_len, sizeof(payload_str) - 1)] = '\0';
+		
+		if (sscanf(payload_str, "%hhu,%hhu,%hhu", &r_val, &g_val, &b_val) == 3 ||
+		    sscanf(payload_str, "%hhu %hhu %hhu", &r_val, &g_val, &b_val) == 3) {
+			
+			struct led_rgb pixels[LED_STRIP_SIZE];
+			
+			// Set all LEDs to the same color
+			for (int i = 0; i < LED_STRIP_SIZE; i++) {
+				pixels[i].r = r_val;
+				pixels[i].g = g_val;
+				pixels[i].b = b_val;
+			}
+			
+			r = led_strip_update_rgb(led_dev, pixels, LED_STRIP_SIZE);
+			if (r < 0) {
+				LOG_ERR("Failed to update LED strip: %d", r);
+				code = COAP_RESPONSE_CODE_INTERNAL_ERROR;
+			} else {
+				LOG_INF("LED strip updated: RGB(%u,%u,%u)", r_val, g_val, b_val);
+				code = COAP_RESPONSE_CODE_CHANGED;
+			}
+		} else {
+			LOG_ERR("Invalid LED payload format");
+			code = COAP_RESPONSE_CODE_BAD_REQUEST;
+		}
+	} else {
+		code = COAP_RESPONSE_CODE_BAD_REQUEST;
+	}
+
+	if (type == COAP_TYPE_CON) {
+		type = COAP_TYPE_ACK;
+	} else {
+		type = COAP_TYPE_NON_CON;
+	}
+
+	r = coap_packet_init(&response, data, MAX_MSG_LEN,
+			     COAP_VERSION_1, type, tkl, token, code, id);
+	if (r < 0) {
+		return r;
+	}
+
+	return send_coap_reply(&response, addr, addr_len);
+}
+#endif
 
 int print_reply(const struct coap_packet *response,
 			    	   struct coap_reply *reply,
@@ -296,6 +388,11 @@ static struct coap_resource coap_resources[] = {
 	{ .get = piggyback_get,
 	  .path = COAP_PATH("sensor")
 	},
+#if DT_NODE_EXISTS(LED_STRIP_NODE)
+	{ .post = led_post,
+	  .path = COAP_PATH("led")
+	},
+#endif
 	{ },
 };
 
@@ -351,8 +448,24 @@ int main(void)
 	bme280 = bme280_shield_get_device();
 #endif
 
+#if DT_NODE_EXISTS(LED_STRIP_NODE)
+	if (device_is_ready(led_dev)) {
+		struct led_rgb pixels[LED_STRIP_SIZE];
+		// Initialize with dim blue to show LED strip is ready
+		for (int i = 0; i < LED_STRIP_SIZE; i++) {
+			pixels[i].r = 0;
+			pixels[i].g = 0;
+			pixels[i].b = 20;
+		}
+		led_strip_update_rgb(led_dev, pixels, LED_STRIP_SIZE);
+		LOG_INF("LED strip initialized");
+	} else {
+		LOG_WRN("LED strip device not ready");
+	}
+#endif
+
 	k_thread_start(receiver_thread_id);
-	openthread_start(openthread_get_default_context());
+	openthread_run();
 
 	k_sem_take(&quit_lock, K_FOREVER);
 
