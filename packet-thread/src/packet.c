@@ -13,8 +13,13 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/led_strip.h>
+
+/* BME280 Environmental Sensor */
+#define BME280_NODE DT_NODELABEL(bme280_sensor)
+#if DT_NODE_EXISTS(BME280_NODE)
+#include <bme280_shield.h>
+#endif
 
 #include <zephyr/net/socket.h>
 #include <zephyr/net/ethernet.h>
@@ -32,11 +37,11 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
 #endif
 #define RECV_BUFFER_SIZE 128
 
-static struct k_sem quit_lock;
-static bool finish;
-static K_SEM_DEFINE(iface_up, 0, 1);
+#if DT_NODE_EXISTS(BME280_NODE)
 static const struct device *bme280;
+#endif
 
+/* WS2812 LED Strip */
 #define LED_STRIP_NODE DT_NODELABEL(led_strip)
 #if DT_NODE_EXISTS(LED_STRIP_NODE)
 #define LED_STRIP_SIZE DT_PROP(LED_STRIP_NODE, chain_length)
@@ -48,55 +53,20 @@ do { \
 		pixels[i].b = (_b); \
 	} \
 } while (0)
+
 static const struct device *led_dev = DEVICE_DT_GET(LED_STRIP_NODE);
 #endif
+
+static struct k_sem quit_lock;
+static bool finish;
+static K_SEM_DEFINE(iface_up, 0, 1);
+
 
 static void recv_packet(void);
 
 K_THREAD_DEFINE(receiver_thread_id, STACK_SIZE,
 		recv_packet, NULL, NULL, NULL,
 		THREAD_PRIORITY, 0, -1);
-
-static const struct device *get_bme280_device(void)
-{
-	const struct device *const dev = DEVICE_DT_GET_ANY(bosch_bme280);
-
-	if (dev == NULL) {
-		/* No such node, or the node does not have status "okay". */
-		LOG_ERR("Error: no device found.");
-		return NULL;
-	}
-
-	if (!device_is_ready(dev)) {
-		LOG_ERR("Error: Device \"%s\" is not ready; ", dev->name);
-		return NULL;
-	}
-
-	LOG_INF("Found device \"%s\"", dev->name);
-	return dev;
-}
-
-static int read_sensor_data(const struct device *bme280, char *buffer, size_t buffer_size)
-{
-	int ret;
-	struct sensor_value temp, press, humidity;
-
-	ret = sensor_sample_fetch(bme280);
-	if (ret < 0) {
-		return ret;
-	}
-
-	sensor_channel_get(bme280, SENSOR_CHAN_AMBIENT_TEMP, &temp);
-	sensor_channel_get(bme280, SENSOR_CHAN_PRESS, &press);
-	sensor_channel_get(bme280, SENSOR_CHAN_HUMIDITY, &humidity);
-
-	ret = snprintf(buffer, buffer_size,
-				  	"Temp: %d.%06d; press: %d.%06d; humidity: %d.%06d\n",
-				   	temp.val1, temp.val2, press.val1, press.val2,
-					humidity.val1, humidity.val2);
-
-	return ret;
-}
 
 #if DT_NODE_EXISTS(LED_STRIP_NODE)
 static void update_led_strip(uint8_t position, uint8_t r, uint8_t g, uint8_t b)
@@ -216,11 +186,15 @@ static void recv_packet(void)
 					LOG_ERR("LED strip device not found or not ready");
 				}
 			} else if (strncmp(buffer, "temp", 4) == 0) {
+#if DT_NODE_EXISTS(BME280_NODE)
 				if (bme280) {
-					len = read_sensor_data(bme280, buffer, sizeof(buffer));
+					len = bme280_shield_read_sensor_data(bme280, buffer, sizeof(buffer));
 				} else {
 					LOG_ERR("BME280 not found");
 				}
+#else
+				len = snprintf(buffer, sizeof(buffer), "BME280 sensor not available\n");
+#endif
 			} else {
 				len = snprintf(buffer, sizeof(buffer), "Hello from Zephyr!\n");
 			}
@@ -276,9 +250,11 @@ int main(void)
 {
 	k_sem_init(&quit_lock, 0, K_SEM_MAX_LIMIT);
 
-	bme280 = get_bme280_device();
+#if DT_NODE_EXISTS(BME280_NODE)
+	bme280 = bme280_shield_get_device();
+#endif
 	
-	#if DT_NODE_EXISTS(LED_STRIP_NODE)
+#if DT_NODE_EXISTS(LED_STRIP_NODE)
 	if (device_is_ready(led_dev)) {
 		struct led_rgb led_pixels[LED_STRIP_SIZE];
 		FILL_LED_STRIP(led_pixels, LED_STRIP_SIZE, 0, 0, 20);
@@ -286,7 +262,7 @@ int main(void)
 	} else {
 		LOG_WRN("LED strip device not ready");
 	}
-	#endif
+#endif
 
 	k_thread_start(receiver_thread_id);
 	openthread_run();

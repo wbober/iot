@@ -1,0 +1,22 @@
+/*
+ * Copyright (c) 2020, Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
+ * BME280 Environmental Sensor Shield
+ * 
+ * This shield configures a BME280 sensor on the Arduino I2C bus.
+ * Default I2C address is 0x76. If your device uses 0x77, modify the reg property.
+ */
+
+&arduino_i2c {
+	status = "okay";
+	
+	bme280_sensor: bme280@76 {
+		compatible = "bosch,bme280";
+		reg = <0x76>;
+		status = "okay";
+	};
+};

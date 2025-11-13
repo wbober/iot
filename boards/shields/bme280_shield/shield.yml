@@ -1,0 +1,6 @@
+shields:
+  - name: bme280_shield
+    full_name: BME280 Environmental Sensor Shield
+    vendor: Bosch
+    supported_features:
+      - sensor

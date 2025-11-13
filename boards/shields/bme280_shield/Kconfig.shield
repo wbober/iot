@@ -1,0 +1,2 @@
+config SHIELD_BME280_SHIELD
+	def_bool $(shields_list_contains,bme280_shield)

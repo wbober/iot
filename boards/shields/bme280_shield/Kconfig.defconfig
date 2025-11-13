@@ -1,0 +1,12 @@
+if SHIELD_BME280_SHIELD
+
+config I2C
+	default y
+
+config SENSOR
+	default y
+
+config BME280
+	default y
+
+endif # SHIELD_BME280_SHIELD
