@@ -28,5 +28,6 @@ Tasks
 * Check the neighbor table. You can use `ot neighbor table` shell command to do that. What devices are in the neighbor table?
 * Check the router table. You can use `ot router table` shell command to do that. What devices are in the router table? Can you identify any devices in the router table that are not in the neighbor table?
 * You can ping the whole network using one of the multicast addresses. For example, try `ff02::1` or `ff03::1`. Use `net ping` command to do that. Can you explain the difference between the addresses?
-* The program opens a UDP socket at port 1234. Modify the program to send back a message to a received packet. This could be for example sensor readings or a simple message if you don't have a sensor. You can use `sendto` function to send a packet back to the sender.
+* The program opens a UDP socket at port 1234. Depending on the hardware you have, you can send and receive commands to control the LED strip and and read the BME280 sensor. Test the functionality by sending commands to the leader of the network.
+* Modify the program by adding an echo command that will echo back the received packet. You can use `sendto` function to send a packet back to the sender.
 * Use `ot udp open` and `ot udp send` commands to send a packet to another device. Use an address that you have discovered in previous steps. What did the peer device replied back? Can you identify the packet in Wireshark?

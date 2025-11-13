@@ -168,23 +168,26 @@ static void recv_packet(void)
 	socklen_t addrlen = sizeof(src_addr);
 
 	while (ret >= 0) {
-		received = recvfrom(socket, buffer,	sizeof(buffer), 0, &src_addr, &addrlen);
+		received = recvfrom(socket, buffer,	sizeof(buffer) - 1, 0, &src_addr, &addrlen);
 
 		if (received > 0) {
+			/* Null-terminate the received data for string operations */
+			buffer[received] = '\0';
+			
 			print_address(src_addr.sa_family, &src_addr);
 			LOG_HEXDUMP_DBG(buffer, received, "Data:");
 
+			len = 0;
+
 			if (strncmp(buffer, "led:", 4) == 0) {
-				if (DT_NODE_EXISTS(LED_STRIP_NODE)) {
-					uint8_t r, g, b;
-					if (sscanf(buffer, "led:%c,%c,%c", &r, &g, &b) == 3) {
-						update_led_strip(LED_STRIP_SIZE, r, g, b);
-					} else {
-						LOG_ERR("Invalid LED command: %s", buffer);
-					}
+#if DT_NODE_EXISTS(LED_STRIP_NODE)				
+				uint8_t r, g, b;
+				if (sscanf(buffer, "led:%hhu,%hhu,%hhu", &r, &g, &b) == 3) {
+					update_led_strip(LED_STRIP_SIZE, r, g, b);
 				} else {
-					LOG_ERR("LED strip device not found or not ready");
+					LOG_ERR("Invalid LED command: %s", buffer);
 				}
+#endif
 			} else if (strncmp(buffer, "temp", 4) == 0) {
 #if DT_NODE_EXISTS(BME280_NODE)
 				if (bme280) {
@@ -192,13 +195,10 @@ static void recv_packet(void)
 				} else {
 					LOG_ERR("BME280 not found");
 				}
-#else
-				len = snprintf(buffer, sizeof(buffer), "BME280 sensor not available\n");
 #endif
 			} else {
 				len = snprintf(buffer, sizeof(buffer), "Hello from Zephyr!\n");
 			}
-
 
 			if (len) {
 				ret = sendto(socket, buffer, len, 0, &src_addr, addrlen);
