@@ -1,0 +1,62 @@
+{
+	"folders": [
+		{
+			"path": "../ncs"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"nrf-connect.applications": [
+			"${workspaceFolder}/nrf/samples/wifi/shell",
+			"${workspaceFolder}/nrf/samples/net/mqtt",
+			"${workspaceFolder}/nrf/samples/zigbee/shell",
+			"${workspaceFolder:iot-lectures}/packet-thread",
+			"${workspaceFolder:iot-lectures}/packet",
+			"${workspaceFolder}/nrf/samples/openthread/cli",
+			"${workspaceFolder:iot-lectures}/coap",
+			"${workspaceFolder:iot-lectures}/yr.no",
+			"${workspaceFolder:iot-lectures}/bme280",
+			"${workspaceFolder:iot-lectures}/blinky",
+			"${workspaceFolder:iot-lectures}/scanner",
+			"${workspaceFolder:iot-lectures}/template",
+			"${workspaceFolder}/zephyr/samples/bluetooth/peripheral_esp",
+			"${workspaceFolder:iot-lectures}/led_strip"
+		],
+		"nrf-connect.west.env": {
+			"$base": "process"
+		},
+		"files.associations": {
+			"sl_status.h": "c",
+			"array": "c",
+			"string": "c",
+			"string_view": "c",
+			"driver_zephyr.h": "c",
+			"supp_mgmt.h": "c",
+			"system_error": "c",
+			"message_channel.h": "c",
+			"sensor.h": "c",
+			"gpio.h": "c",
+			"stdlib.h": "c",
+			"functional": "c",
+			"ieee802154_frame.h": "c",
+			"socket_helpers.h": "c",
+			"cerrno": "c",
+			"*.tcc": "c",
+			"fstream": "c",
+			"span": "c",
+			"ieee802154.h": "c",
+			"openthread.h": "c",
+			"coap.h": "c",
+			"devicetree.h": "c",
+			"compare": "c"
+		},
+		"nrf-connect.topdir": "${workspaceFolder}",
+		"nrf-connect.toolchain.path": "${nrf-connect.toolchain:2.6.2}",
+		"esbonio.sphinx.confDir": "",
+		"files.insertFinalNewline": true,
+		"restructuredtext.pythonRecommendation.disabled": true,
+		"editor.inlayHints.enabled": "offUnlessPressed"
+	}
+}
